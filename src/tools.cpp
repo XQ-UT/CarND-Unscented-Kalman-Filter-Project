@@ -4,6 +4,8 @@
 using Eigen::VectorXd;
 using Eigen::MatrixXd;
 using std::vector;
+using std::cout;
+using std::endl;
 
 Tools::Tools() {}
 
@@ -15,4 +17,25 @@ VectorXd Tools::CalculateRMSE(const vector<VectorXd> &estimations,
   TODO:
     * Calculate the RMSE here.
   */
+
+  // px, py, v, yaw, yaw_rate.
+  VectorXd rmse(5);
+  rmse << 0, 0, 0, 0, 0;
+
+  if(estimations.size() != ground_truth.size()){
+      cout << "estimation size is not equal to groud_truth size." << endl;
+      return rmse;
+  }
+
+  if(estimations.size() == 0){
+      cout << "estimation size is 0." << endl;
+      return rmse;
+  }
+
+  for(int i = 0; i < estimations.size(); ++i){
+      VectorXd diff = (estimations[i] - ground_truth[i]).array().square();
+      rmse += diff;
+  }
+
+  return rmse / estimations.size();
 }
