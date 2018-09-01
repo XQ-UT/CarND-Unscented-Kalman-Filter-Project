@@ -3,3 +3,7 @@
 
 # build files
 build/
+cmake-build-debug/
+
+# Clion	
+.idea/

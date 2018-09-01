@@ -54,6 +54,16 @@ UKF::UKF() {
 
   Hint: one or more values initialized above might be wildly off...
   */
+
+  is_initialized_ = false;
+  n_x_ = 5;
+  n_aug_ = 7;
+  lambda_ = 3 - n_aug_;
+
+  Xsig_pred_ = MatrixXd(n_aug_, 2 * n_aug_ + 1);
+  weights_ = VectorXd(2 * n_aug_ + 1);
+
+
 }
 
 UKF::~UKF() {}
@@ -69,6 +79,30 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   Complete this function! Make sure you switch between lidar and radar
   measurements.
   */
+
+  if(!is_initialized_){
+    if(meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_){
+      is_initialized_ = true;
+
+    }else if( meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_){
+      is_initialized_ = true;
+
+    }
+    time_us_ = meas_package.timestamp_;
+    return;
+  }
+
+  // Prediction.
+  double delta_t = meas_package.timestamp_ - time_us_ / 1000000.0;
+  time_us_ = meas_package.timestamp_;
+  Prediction(delta_t);
+
+  // Update.
+  if(meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_){
+    UpdateLidar(meas_package);
+  }else if( meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_){
+    UpdateRadar(meas_package);
+  }
 }
 
 /**
