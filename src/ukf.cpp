@@ -60,9 +60,24 @@ UKF::UKF() {
   n_aug_ = 7;
   lambda_ = 3 - n_aug_;
 
-  Xsig_pred_ = MatrixXd(n_aug_, 2 * n_aug_ + 1);
-  weights_ = VectorXd(2 * n_aug_ + 1);
+  x_.fill(0.0);
+  P_ << 1, 0, 0, 0, 0,
+        0, 1, 0, 0, 0,
+        0, 0, 10, 0, 0,
+        0, 0, 0, 1, 0,
+        0, 0, 0, 0, 10;
 
+  Xsig_pred_ = MatrixXd(n_x_, 2 * n_aug_ + 1);
+  Xsig_pred_.fill(0.0);
+
+  weights_ = VectorXd(2 * n_aug_ + 1);
+  for(int i = 0; i < 2 * n_aug_ + 1; ++i){
+    if(i == 0){
+      weights_(i) = 1.0 * lambda_ / (lambda_ + n_aug_);
+      continue;
+    }
+    weights_(i) = 0.5 * (lambda_ + n_aug_);
+  }
 
 }
 
@@ -83,11 +98,21 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   if(!is_initialized_){
     if(meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_){
       is_initialized_ = true;
+      x_.head(2) = meas_package.raw_measurements_;
+      x_(3) = atan2(x_(1), x_(0));
 
     }else if( meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_){
       is_initialized_ = true;
+      double ro = meas_package.raw_measurements_(0);
+      double yaw = meas_package.raw_measurements_(1);
+      double ro_rate = meas_package.raw_measurements_(2);
 
+      x_(0) = ro * cos(yaw);
+      x_(1) = ro * sin(yaw);
+      x_(2) = ro_rate;
+      x_(3) = yaw;
     }
+
     time_us_ = meas_package.timestamp_;
     return;
   }
@@ -117,6 +142,66 @@ void UKF::Prediction(double delta_t) {
   Complete this function! Estimate the object's location. Modify the state
   vector, x_. Predict sigma points, the state, and the state covariance matrix.
   */
+
+  // Generate augument sigma points, Xsig_aug.
+  VectorXd x_aug = VectorXd(n_aug_);
+  x_aug.head(n_x_) = x_;
+  x_aug.tail(2) << 0, 0;
+
+  MatrixXd P_aug = MatrixXd(n_aug_, n_aug_);
+  P_aug.block(0, 0, n_x_, n_x_) = P_;
+  P_aug(n_x_, n_x_) = std_a_ * std_a_;
+  P_aug(n_x_ + 1, n_x_ + 1) = std_yawdd_ * std_yawdd_;
+  MatrixXd A_aug = P_aug.llt().matrixL();
+
+  MatrixXd Xsig_aug = MatrixXd(n_aug_, 2 * n_aug_ + 1);
+  Xsig_aug.col(0)  = x_aug;
+  Xsig_aug.block(0, 1, n_aug_, n_aug_) = x_aug.replicate(1, n_aug_) + sqrt(lambda_ + n_aug_) * A_aug;
+  Xsig_aug.block(0, 1 + n_aug_, n_aug_, n_aug_) = x_aug.replicate(1, n_aug_) - sqrt(lambda_ + n_aug_) * A_aug;
+
+  // Sigma point prediction.
+  for(int i = 0; i < 2 * n_aug_ + 1; ++i){
+    Xsig_pred_.col(i) = Xsig_aug.col(i).head(n_x_);
+
+    double v = Xsig_aug.col(i)(2);
+    double yaw = Xsig_aug.col(i)(3);
+    double yaw_rate = Xsig_aug.col(i)(4);
+    double std_a = Xsig_aug.col(i)(5);
+    double std_yawdd = Xsig_aug.col(i)(6);
+
+    VectorXd process_noise (n_x_);
+    process_noise <<  0.5 * delta_t * delta_t * cos(yaw) * std_a,
+              0.5 * delta_t * delta_t * sin(yaw) * std_a,
+              delta_t * std_a,
+              0.5 * delta_t * delta_t * std_yawdd,
+              delta_t * std_yawdd;
+    Xsig_pred_ += process_noise;
+
+    VectorXd process(n_x_);
+    if(yaw_rate == 0.0){
+      process <<  v * cos(yaw) * delta_t,
+                  v * sin(yaw) * delta_t,
+                  0,
+                  0,
+                  0;
+    }else{
+      process <<  v * (sin(yaw + yaw_rate * delta_t) - sin(yaw_rate)) / yaw_rate,
+                  v * (-cos(yaw + yaw_rate * delta_t) + cos(yaw)) / yaw_rate,
+                  0,
+                  yaw_rate * delta_t,
+                  0;
+    }
+  }
+
+  // Calculate Predicted Mean and Covariance.
+  x_ = (weights_.transpose().replicate(n_x_, 1).array() * Xsig_pred_.array()).rowwise().sum();
+
+  P_.fill(0.0);
+  for(int i = 0; i < 2 * n_aug_ + 1; ++i){
+    VectorXd diff = Xsig_pred_.col(i) - x_;
+    P_ += weights_(i) * diff * (diff.transpose());
+  }
+
 }
 
 /**
