@@ -217,6 +217,30 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
 
   You'll also need to calculate the lidar NIS.
   */
+  MatrixXd Zsig (2, 2 * n_aug_ + 1);
+  Zsig = Xsig_pred_.block(0, 0, 2, 2 * n_aug_ + 1);
+  VectorXd z_pred = weights_.transpose().replicate(2,1).array() * Zsig.array();
+
+  MatrixXd R (2, 2);
+  R <<  std_laspx_ * std_laspx_, 0,
+        0, std_laspy_ * std_laspy_;
+
+  MatrixXd S = R;
+  for(int i = 0; i < 2 * n_aug_ + 1; ++i){
+    VectorXd diff = Zsig.col(i) - z_pred;
+    S += weights_(i) * diff * diff.transpose();
+  }
+
+  MatrixXd T (5, 2);
+  T.fill(0.0);
+  for(int i = 0; i < 2 * n_aug_ + 1; ++i){
+    T += weights_(i) * (Xsig_pred_.col(i) - x_) * (Zsig.col(i) - z_pred).transpose();
+  }
+
+  MatrixXd K = T * S.inverse();
+  x_ = x_ + K * (meas_package.raw_measurements_- z_pred);
+  P_ = P_ - K * S * K.transpose();
+
 }
 
 /**
@@ -233,7 +257,7 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   You'll also need to calculate the radar NIS.
   */
 
-  MatrixXd Zsig (3, 2 * n_aug_ +1);
+  MatrixXd Zsig (3, 2 * n_aug_ + 1);
   for(int i = 0; i < 2 * n_aug_ + 1; ++i){
     VectorXd x = Xsig_pred_.col(i);
     double px = x(0);
