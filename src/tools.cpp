@@ -18,9 +18,8 @@ VectorXd Tools::CalculateRMSE(const vector<VectorXd> &estimations,
     * Calculate the RMSE here.
   */
 
-  // px, py, v, yaw, yaw_rate.
-  VectorXd rmse(5);
-  rmse << 0, 0, 0, 0, 0;
+  VectorXd rmse(4);
+  rmse << 0, 0, 0, 0;
 
   if(estimations.size() != ground_truth.size()){
       cout << "estimation size is not equal to groud_truth size." << endl;
@@ -37,5 +36,8 @@ VectorXd Tools::CalculateRMSE(const vector<VectorXd> &estimations,
       rmse += diff;
   }
 
-  return rmse / estimations.size();
+  rmse = rmse / estimations.size();
+  rmse = rmse.array().sqrt();
+  return rmse;
+
 }

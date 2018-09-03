@@ -76,7 +76,7 @@ UKF::UKF() {
       weights_(i) = 1.0 * lambda_ / (lambda_ + n_aug_);
       continue;
     }
-    weights_(i) = 0.5 * (lambda_ + n_aug_);
+    weights_(i) = 0.5 / (lambda_ + n_aug_);
   }
 
 }
@@ -118,7 +118,7 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   }
 
   // Prediction.
-  double delta_t = meas_package.timestamp_ - time_us_ / 1000000.0;
+  double delta_t = (meas_package.timestamp_ - time_us_) / 1000000.0;
   time_us_ = meas_package.timestamp_;
   Prediction(delta_t);
 
@@ -146,9 +146,11 @@ void UKF::Prediction(double delta_t) {
   // Generate augument sigma points, Xsig_aug.
   VectorXd x_aug = VectorXd(n_aug_);
   x_aug.head(n_x_) = x_;
-  x_aug.tail(2) << 0, 0;
+  x_aug(5) = 0;
+  x_aug(6) = 0;
 
   MatrixXd P_aug = MatrixXd(n_aug_, n_aug_);
+  P_aug.fill(0.0);
   P_aug.block(0, 0, n_x_, n_x_) = P_;
   P_aug(n_x_, n_x_) = std_a_ * std_a_;
   P_aug(n_x_ + 1, n_x_ + 1) = std_yawdd_ * std_yawdd_;
@@ -170,27 +172,28 @@ void UKF::Prediction(double delta_t) {
     double std_yawdd = Xsig_aug.col(i)(6);
 
     VectorXd process_noise (n_x_);
-    process_noise <<  0.5 * delta_t * delta_t * cos(yaw) * std_a,
-              0.5 * delta_t * delta_t * sin(yaw) * std_a,
-              delta_t * std_a,
-              0.5 * delta_t * delta_t * std_yawdd,
-              delta_t * std_yawdd;
-    Xsig_pred_ += process_noise;
+    process_noise <<    0.5 * delta_t * delta_t * cos(yaw) * std_a,
+                        0.5 * delta_t * delta_t * sin(yaw) * std_a,
+                        delta_t * std_a,
+                        0.5 * delta_t * delta_t * std_yawdd,
+                        delta_t * std_yawdd;
+    Xsig_pred_.col(i) += process_noise;
 
     VectorXd process(n_x_);
-    if(yaw_rate == 0.0){
+    if(fabs(yaw_rate) < 0.0001){
       process <<  v * cos(yaw) * delta_t,
                   v * sin(yaw) * delta_t,
                   0,
                   0,
                   0;
     }else{
-      process <<  v * (sin(yaw + yaw_rate * delta_t) - sin(yaw_rate)) / yaw_rate,
+      process <<  v * (sin(yaw + yaw_rate * delta_t) - sin(yaw)) / yaw_rate,
                   v * (-cos(yaw + yaw_rate * delta_t) + cos(yaw)) / yaw_rate,
                   0,
                   yaw_rate * delta_t,
                   0;
     }
+    Xsig_pred_.col(i) += process;
   }
 
   // Calculate Predicted Mean and Covariance.
@@ -199,7 +202,11 @@ void UKF::Prediction(double delta_t) {
   P_.fill(0.0);
   for(int i = 0; i < 2 * n_aug_ + 1; ++i){
     VectorXd diff = Xsig_pred_.col(i) - x_;
-    P_ += weights_(i) * diff * (diff.transpose());
+
+    while(diff(3) > M_PI)   diff(3)-=2.*M_PI;
+    while(diff(3) < -M_PI)  diff(3)+=2.*M_PI;
+
+    P_ += weights_(i) * diff * diff.transpose();
   }
 
 }
@@ -219,7 +226,7 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
   */
   MatrixXd Zsig (2, 2 * n_aug_ + 1);
   Zsig = Xsig_pred_.block(0, 0, 2, 2 * n_aug_ + 1);
-  VectorXd z_pred = weights_.transpose().replicate(2,1).array() * Zsig.array();
+  VectorXd z_pred = (weights_.transpose().replicate(2,1).array() * Zsig.array()).rowwise().sum();
 
   MatrixXd R (2, 2);
   R <<  std_laspx_ * std_laspx_, 0,
@@ -228,13 +235,13 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
   MatrixXd S = R;
   for(int i = 0; i < 2 * n_aug_ + 1; ++i){
     VectorXd diff = Zsig.col(i) - z_pred;
-    S += weights_(i) * diff * diff.transpose();
+    S += weights_(i) * diff * (diff.transpose());
   }
 
   MatrixXd T (5, 2);
   T.fill(0.0);
   for(int i = 0; i < 2 * n_aug_ + 1; ++i){
-    T += weights_(i) * (Xsig_pred_.col(i) - x_) * (Zsig.col(i) - z_pred).transpose();
+    T += weights_(i) * (Xsig_pred_.col(i) - x_) * ((Zsig.col(i) - z_pred).transpose());
   }
 
   MatrixXd K = T * S.inverse();
@@ -256,7 +263,6 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
 
   You'll also need to calculate the radar NIS.
   */
-
   MatrixXd Zsig (3, 2 * n_aug_ + 1);
   for(int i = 0; i < 2 * n_aug_ + 1; ++i){
     VectorXd x = Xsig_pred_.col(i);
@@ -286,11 +292,10 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   MatrixXd T (5, 3);
   T.fill(0.0);
   for(int i = 0; i < 2 * n_aug_ + 1; ++i){
-    T += weights_(i) * (Xsig_pred_.col(i) - x_) * ( Zsig - z_pred).transpose();
+    T += weights_(i) * (Xsig_pred_.col(i) - x_) * (( Zsig.col(i)- z_pred).transpose());
   }
 
   MatrixXd K = T * S.inverse();
   x_ = x_ + K * (meas_package.raw_measurements_ - z_pred);
   P_ = P_ - K * S * K.transpose();
-
 }
